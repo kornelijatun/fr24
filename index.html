@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <script src="https://cesiumjs.org/releases/1.54/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesiumjs.org/releases/1.54/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+</head>
+<body>
+<div id="cesiumContainer" style="width: 700px; height:400px"></div>
+<table>
+    <tr>
+        <th>Aukštis nuo:</th> <th><input type="text" id="nuo" value="0" onchange="refreshFilter()"></th>
+    </tr>
+    <tr>
+        <th>Aukštis iki:</th> <th><input type="text" id="iki" value="10000" onchange="refreshFilter()"></th>
+    </tr>
+    <tr>
+        <th>Filtras įjungtas:</th> <th><input id="ijungtas" type="checkbox" onchange="refreshFilter()" checked></th><th>Ant žemės:</th> <th><input id="zeme" type="checkbox" onchange="refreshFilter()"></th>
+    </tr>
+</table>
+
+<script>
+
+
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5NjUxYjBkOC02M2RlLTQ1NWQtODJhMi02NWQ0MTcyNjEwMmQiLCJpZCI6NzgzOCwic2NvcGVzIjpbImFzciIsImdjIl0sImlhdCI6MTU1MDU4MjAxNH0.1VXJoEl00MYI4xaK3bkJBm5Z1Dt92vSYuwZFsBYg_fQ';
+    var viewer = new Cesium.Viewer('cesiumContainer');
+    var entities = viewer.entities;
+    var filter = {
+        nuo : 0,
+        iki : 10000,
+        ijungtas : true,
+        antZemes : false,
+    };
+
+    function getNrFrom(str){
+        var value =  document.getElementById(str).value;
+        var g = parseInt(value);
+        if(isNaN(g))g=0;
+        return g;
+    }
+
+    function refreshFilter(){
+        filter.nuo = getNrFrom("nuo");
+        filter.iki = getNrFrom("iki");
+        filter.ijungtas = document.getElementById("ijungtas").checked;
+        filter.antZemes = document.getElementById("zeme").checked;
+        drawPlanes()
+    }
+
+    var currentInfo = {};
+
+
+
+
+
+    viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(23.0,55.1,895000.0)
+    });
+
+    var url = 'https://data-live.flightradar24.com/zones/fcgi/feed.js?bounds=56.5,53.8,20,27';
+    var request = new XMLHttpRequest();
+
+    function requestApi(){
+        request.onload = networkReceive;
+        request.open("GET", url, true);
+        request.send();
+    }
+
+    function isValid(element){
+        return element.lat != null && element.lon != null && element.crs != null
+    }
+
+
+    function createEntity(info){
+        var e = entities.getOrCreateEntity(info.id);
+
+        e.name = "Skrydžio informacija";
+        e.position = Cesium.Cartesian3.fromDegrees(info.lon,info.lat);
+        e.billboard = {
+            image : 'airport.png',
+            scale : 0.3,
+            rotation : (-info.crs)*3.14/180 ,
+            heightReference : Cesium.HeightReference.CLAMP_TO_GROUND
+        };
+        e.description = '<div style="text-align: left; font-size: xx-small;">' +   // .bindTooltip
+            'Crs: '       + String(info.crs) + '&deg;<br>' +
+            'Alt: '       + info.alt + 		   ' ft<br>' +
+            'GS: '        + info.gs +          ' kt<br>' +
+            'VS: '        + info.vs +   	   ' fpm<br>' +
+            'Squawk: '    + info.squawk +      '<br>' +
+            'Code: '      + info.code +        '<br>' +
+            'FPL: '       + info.fpl +         '<br>' +
+            'On ground: ' + info.ong +         '<br>' +
+            'y: '         + info.y +
+            '</div>';
+
+    }
+
+
+    function myParseJson(tekstas){
+        var jsonOb = JSON.parse(tekstas);
+        var objektai = {};
+        for (var key in jsonOb) {
+
+            var element = jsonOb[key];
+
+            var info = {
+                id :key,
+                lat:element[1],
+                lon : element[2],
+                crs    : element[3],
+                alt    : element[4],
+                gs     : element[5],  // ground speed
+                vs     : element[15], // vertical speed
+                squawk : element[6],
+                code   : element[18], // ICAO code
+                fpl    : element[13], // flight plan no.
+                ong    : element[14], // on ground
+                y      : element[17] // ?
+            };
+
+
+            if(isValid(info)) {
+
+                objektai[info.id]=info;
+
+            }
+
+        }
+        return objektai;
+    }
+
+
+
+    function hideNotVisible(collection){
+        entities.values
+            .filter(obj=>obj._id!=null)
+            .map(obj=>obj._id)
+            .filter(key=> collection[key]==null)
+            .forEach(key=>{
+                entities.removeById(key);
+            })
+
+
+
+    }
+
+    function drawPlanes(){
+        let filtered  = Object.fromEntries(Object.entries(currentInfo).filter(([key,info])=> filter.nuo <= info.alt && info.alt <= filter.iki));
+
+
+
+        if(filter.ijungtas){
+            filtered = Object.fromEntries(Object.entries(currentInfo).filter(([key,info])=>
+            {return info.ong===(filter.antZemes ? 1 : 0)}));
+        }
+
+        entities.suspendEvents();
+        hideNotVisible(filtered);
+
+        Object.values(filtered).forEach(info=>createEntity(info));
+        entities.resumeEvents();
+    }
+
+    function networkReceive(){
+
+        currentInfo = myParseJson(request.responseText);
+
+        //deleteOld();
+
+       // oldInfo = currentInfo;
+
+        drawPlanes();
+
+    }
+
+
+    requestApi();
+    refreshFilter();
+    setInterval(requestApi, 3000);
+
+
+
+
+
+
+
+</script>
+
+
+</body>
+</html>
